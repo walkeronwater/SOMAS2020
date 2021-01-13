@@ -2,7 +2,6 @@ package team6
 
 import (
 	"github.com/SOMAS2020/SOMAS2020/internal/common/baseclient"
-	"github.com/SOMAS2020/SOMAS2020/internal/common/rules"
 	"github.com/SOMAS2020/SOMAS2020/internal/common/shared"
 )
 
@@ -11,26 +10,21 @@ type speaker struct {
 	*client
 }
 
-func (s *speaker) PayJudge() shared.SpeakerReturnContent {
-	return s.BaseSpeaker.PayJudge()
-}
-
-func (s *speaker) DecideAgenda(ruleID rules.RuleMatrix) shared.SpeakerReturnContent {
-	return s.BaseSpeaker.DecideAgenda(ruleID)
-}
-
-func (s *speaker) DecideVote(ruleID rules.RuleMatrix, aliveClients []shared.ClientID) shared.SpeakerReturnContent {
-	return s.BaseSpeaker.DecideVote(ruleID, aliveClients)
-}
-
-func (s *speaker) DecideAnnouncement(ruleID rules.RuleMatrix, result bool) shared.SpeakerReturnContent {
-	return s.BaseSpeaker.DecideAnnouncement(ruleID, result)
-}
-
 func (s *speaker) CallJudgeElection(monitoring shared.MonitorResult, turnsInPower int, allIslands []shared.ClientID) shared.ElectionSettings {
+	currJudgeID := s.client.ServerReadHandle.GetGameState().JudgeID
+	otherIslands := []shared.ClientID{}
+
+	for _, team := range allIslands {
+		if currJudgeID == team {
+			continue
+		}
+
+		otherIslands = append(otherIslands, team)
+	}
+
 	var electionsettings = shared.ElectionSettings{
-		VotingMethod:  shared.BordaCount,
-		IslandsToVote: allIslands,
+		VotingMethod:  shared.Runoff,
+		IslandsToVote: otherIslands,
 		HoldElection:  false,
 	}
 	if monitoring.Performed && !monitoring.Result {
@@ -43,5 +37,13 @@ func (s *speaker) CallJudgeElection(monitoring shared.MonitorResult, turnsInPowe
 }
 
 func (s *speaker) DecideNextJudge(winner shared.ClientID) shared.ClientID {
+	if winner == s.client.ServerReadHandle.GetGameState().JudgeID {
+		return s.client.GetID()
+	}
+
+	if s.client.friendship[winner] < s.clientConfig.maxFriendship/1.5 {
+		return s.client.GetID()
+	}
+
 	return winner
 }

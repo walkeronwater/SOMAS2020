@@ -2,19 +2,23 @@
 package team3
 
 import (
+	"github.com/SOMAS2020/SOMAS2020/internal/clients/team3/adv"
 	"github.com/SOMAS2020/SOMAS2020/internal/clients/team3/dynamics"
 	"github.com/SOMAS2020/SOMAS2020/internal/common/baseclient"
-	"github.com/SOMAS2020/SOMAS2020/internal/common/roles"
 	"github.com/SOMAS2020/SOMAS2020/internal/common/rules"
 	"github.com/SOMAS2020/SOMAS2020/internal/common/shared"
 )
 
-const id = shared.Team3
 const printTeam3Logs = false
 
-func init() {
-	ourClient := NewClient(id)
-	baseclient.RegisterClient(id, ourClient)
+// DefaultClient creates the client that will be used for most simulations. All
+// other personalities are considered alternatives. To give a different
+// personality for your agent simply create another (exported) function with the
+// same signature as "DefaultClient" that creates a different agent, and inform
+// someone on the simulation team that you would like it to be included in
+// testing
+func DefaultClient(id shared.ClientID) baseclient.Client {
+	return NewClient(id)
 }
 
 type client struct {
@@ -40,15 +44,16 @@ type client struct {
 
 	// ## Role performance ##
 
-	judgePerformance     map[shared.ClientID]int
-	speakerPerformance   map[shared.ClientID]int
-	presidentPerformance map[shared.ClientID]int
+	judgePerformance     map[shared.ClientID]float64
+	speakerPerformance   map[shared.ClientID]float64
+	presidentPerformance map[shared.ClientID]float64
 
 	// ## IIGO ##
 	ruleVotedOn string
 
 	// ## Game state & History ##
-	criticalStatePrediction criticalStatePrediction
+	// Minimum value for island to avoid critical
+	criticalThreshold shared.Resources
 
 	// declaredResources is a map of all declared island resources
 	declaredResources map[shared.ClientID]shared.Resources
@@ -74,55 +79,56 @@ type client struct {
 	// iigoInfo caches information regarding iigo in the current turn
 	iigoInfo iigoCommunicationInfo
 
+	// Last broken rules
+	oldBrokenRules []string
+
 	localVariableCache map[rules.VariableFieldName]rules.VariableValuePair
 
 	localInputsCache map[rules.VariableFieldName]dynamics.Input
 	// last sanction score cache to determine wheter or not we have been caugth in the last turn
-	lastSanction roles.IIGOSanctionScore
-}
+	lastSanction shared.IIGOSanctionsScore
 
-type criticalStatePrediction struct {
-	upperBound shared.Resources
-	lowerBound shared.Resources
+	forageData map[shared.ForageType][]ForageData
+
+	minimumResourcesWeWant shared.Resources
+
+	initialResourcesAtStartOfGame shared.Resources
+
+	account dynamics.Account
 }
 
 type islandParams struct {
-	giftingThreshold            shared.Resources
-	equity                      float64
-	complianceLevel             float64
-	resourcesSkew               float64
-	saveCriticalIsland          bool
-	escapeCritcaIsland          bool
-	selfishness                 float64
-	minimumRequest              shared.Resources
-	disasterPredictionWeighting float64
-	recidivism                  float64
-	riskFactor                  float64
-	friendliness                float64
-	anger                       float64
-	aggression                  float64
-	sensitivity                 float64
-	salaryThreshold             float64
-	localPoolThreshold          float64
-	giftInflationPercentage     float64
-	trustConstantAdjustor       float64
-	trustParameter              float64
-	NoRequestGiftParam          float64
-	laziness                    float64
+	equity                  float64
+	complianceLevel         float64
+	resourcesSkew           float64
+	saveCriticalIsland      bool
+	selfishness             float64
+	riskFactor              float64
+	friendliness            float64
+	sensitivity             float64
+	giftInflationPercentage float64
+	advType                 adv.Spec
+	adv                     adv.Adv
+	controlLoop             bool
 	//minimumInvestment			float64	// When fish foraging is implemented
 }
 
 type ruleVoteInfo struct {
 	// ourVote needs to be updated accordingly
-	ourVote         bool
+	ourVote         shared.RuleVoteType
 	resultAnnounced bool
 	// true -> yes, false -> no
 	result bool
 }
 
+type ForageData struct {
+	amountContributed shared.Resources
+	amountReturned    shared.Resources
+	turn              uint
+	caught            uint
+}
+
 type iigoCommunicationInfo struct {
-	// ourRole stores our current role in the IIGO
-	ourRole *shared.Role
 	// Retrieved fully from communications
 	// commonPoolAllocation gives resources allocated by president from requests
 	commonPoolAllocation shared.Resources
@@ -146,19 +152,15 @@ type iigoCommunicationInfo struct {
 
 	// ruleVotingResults is a map of rules and the corresponding info
 	ruleVotingResults map[string]*ruleVoteInfo
-	// ourRequest stores how much we requested from commonpool
-	ourRequest shared.Resources
-	// ourDeclaredResources stores how much we said we had to the president
-	ourDeclaredResources shared.Resources
 }
 
 type sanctionInfo struct {
 	// tierInfo provides tiers and sanction score required to get to that tier
-	tierInfo map[roles.IIGOSanctionTier]roles.IIGOSanctionScore
+	tierInfo map[shared.IIGOSanctionsTier]shared.IIGOSanctionsScore
 	// rulePenalties provides sanction score given for breaking each rule
-	rulePenalties map[string]roles.IIGOSanctionScore
+	rulePenalties map[string]shared.IIGOSanctionsScore
 	// islandSanctions stores sanction tier of each island (but not score)
-	islandSanctions map[shared.ClientID]roles.IIGOSanctionTier
+	islandSanctions map[shared.ClientID]shared.IIGOSanctionsTier
 	// ourSanction is the sanction score for our island
-	ourSanction roles.IIGOSanctionScore
+	ourSanction shared.IIGOSanctionsScore
 }

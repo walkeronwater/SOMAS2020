@@ -3,10 +3,10 @@ package team3
 // General client functions testing
 
 import (
-	"github.com/SOMAS2020/SOMAS2020/internal/common/baseclient"
-	"math"
 	"reflect"
 	"testing"
+
+	"github.com/SOMAS2020/SOMAS2020/internal/common/baseclient"
 
 	"github.com/SOMAS2020/SOMAS2020/internal/common/shared"
 )
@@ -84,40 +84,40 @@ func TestInitTrustMapAgg(t *testing.T) {
 			name: "Basic test",
 			ourClient: client{
 				trustMapAgg: map[shared.ClientID][]float64{
-					0: []float64{5.92},
-					1: []float64{62.78},
-					3: []float64{17.62},
-					4: []float64{-10.3},
-					5: []float64{6.42},
+					0: {5.92},
+					1: {62.78},
+					3: {17.62},
+					4: {-10.3},
+					5: {6.42},
 				},
-				BaseClient: baseclient.NewClient(3),
+				BaseClient: baseclient.NewClient(shared.Team3),
 			},
 			expectedVal: map[shared.ClientID][]float64{
-				0: []float64{},
-				1: []float64{},
-				3: []float64{},
-				4: []float64{},
-				5: []float64{},
+				0: {},
+				1: {},
+				3: {},
+				4: {},
+				5: {},
 			},
 		},
 		{
 			name: "Complex test",
 			ourClient: client{
 				trustMapAgg: map[shared.ClientID][]float64{
-					0: []float64{5.92, 8.97, 19.23},
-					1: []float64{62.78, 55.89, -10.65, -20.76},
-					3: []float64{17.62, 5.64, -15.67, 45.86, -99.80},
-					4: []float64{-10.3, 6.58, 3.74, -65.78, -78.98, 34.56},
-					5: []float64{6.42, 69.69, 98.87, -60.7857, 99.9999, 0.00001, 0.05},
+					0: {5.92, 8.97, 19.23},
+					1: {62.78, 55.89, -10.65, -20.76},
+					3: {17.62, 5.64, -15.67, 45.86, -99.80},
+					4: {-10.3, 6.58, 3.74, -65.78, -78.98, 34.56},
+					5: {6.42, 69.69, 98.87, -60.7857, 99.9999, 0.00001, 0.05},
 				},
-				BaseClient: baseclient.NewClient(3),
+				BaseClient: baseclient.NewClient(shared.Team3),
 			},
 			expectedVal: map[shared.ClientID][]float64{
-				0: []float64{},
-				1: []float64{},
-				3: []float64{},
-				4: []float64{},
-				5: []float64{},
+				0: {},
+				1: {},
+				3: {},
+				4: {},
+				5: {},
 			},
 		},
 	}
@@ -151,11 +151,11 @@ func TestUpdateTrustScore(t *testing.T) {
 				BaseClient: baseclient.NewClient(3),
 			},
 			trustMapAgg: map[shared.ClientID][]float64{
-				0: []float64{5.92},
-				1: []float64{62.78},
-				3: []float64{17.62},
-				4: []float64{-50.3},
-				5: []float64{6.42},
+				0: {5.92},
+				1: {62.78},
+				3: {17.62},
+				4: {-50.3},
+				5: {6.42},
 			},
 			expectedVal: map[shared.ClientID]float64{
 				0: 55.92,
@@ -178,11 +178,11 @@ func TestUpdateTrustScore(t *testing.T) {
 				BaseClient: baseclient.NewClient(3),
 			},
 			trustMapAgg: map[shared.ClientID][]float64{
-				0: []float64{5.92, 8.97, 10.75},
-				1: []float64{12.78, -13.45, 23.45},
-				3: []float64{17.62, 25.62},
-				4: []float64{-86.56, 43.43, 48.99},
-				5: []float64{6.42, 0.001, -5.96, -45.45},
+				0: {5.92, 8.97, 10.75},
+				1: {12.78, -13.45, 23.45},
+				3: {17.62, 25.62},
+				4: {-86.56, 43.43, 48.99},
+				5: {6.42, 0.001, -5.96, -45.45},
 			},
 			expectedVal: map[shared.ClientID]float64{
 				0: 64.41666666666666,
@@ -203,43 +203,6 @@ func TestUpdateTrustScore(t *testing.T) {
 	}
 }
 
-func TestUpdateCriticalThreshold(t *testing.T) {
-	cases := []struct {
-		name              string
-		ourClient         client
-		islandState       shared.ClientLifeStatus
-		estimatedResource shared.Resources
-		expected          criticalStatePrediction
-	}{
-		{
-			name: "in Critical Test",
-			ourClient: client{
-				criticalStatePrediction: criticalStatePrediction{upperBound: 70, lowerBound: 30}},
-			islandState:       shared.Critical,
-			estimatedResource: shared.Resources(40),
-			expected:          criticalStatePrediction{upperBound: 70, lowerBound: 40},
-		},
-		{
-			name: "Not in Critical Test",
-			ourClient: client{
-				criticalStatePrediction: criticalStatePrediction{upperBound: 70, lowerBound: 30}},
-			islandState:       shared.Alive,
-			estimatedResource: shared.Resources(60),
-			expected:          criticalStatePrediction{upperBound: 60, lowerBound: 30},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.ourClient.updateCriticalThreshold(tc.islandState, tc.estimatedResource)
-			ans := tc.ourClient.criticalStatePrediction
-			if ans != tc.expected {
-				t.Errorf("got %f-%f, want %f-%f", ans.lowerBound, ans.upperBound, tc.expected.lowerBound, tc.expected.upperBound)
-			}
-		})
-	}
-}
-
 func TestUpdateCompliance(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -253,7 +216,6 @@ func TestUpdateCompliance(t *testing.T) {
 				numTimeCaught:   100,
 				compliance:      0.2,
 				params: islandParams{
-					recidivism:      1.0,
 					complianceLevel: 0.1,
 				},
 			},
@@ -266,11 +228,10 @@ func TestUpdateCompliance(t *testing.T) {
 				numTimeCaught:   1,
 				compliance:      1.0,
 				params: islandParams{
-					recidivism:      1.0,
 					complianceLevel: 0.0,
 				},
 			},
-			expectedVal: math.Exp(-0.5),
+			expectedVal: 1,
 		},
 		{
 			name: "Compliance decay - fully-compliant agent",
@@ -279,7 +240,6 @@ func TestUpdateCompliance(t *testing.T) {
 				numTimeCaught:   10,
 				compliance:      1.0,
 				params: islandParams{
-					recidivism:      1.0,
 					complianceLevel: 1.0,
 				},
 			},

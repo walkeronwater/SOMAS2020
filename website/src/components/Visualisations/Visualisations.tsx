@@ -5,11 +5,15 @@ import VisualisationsNavbar from './VisualisationsNavbar'
 import {
   gamevisualisation,
   visualisations,
-  iifovisualisation,
   iigovisualisation,
   iitovisualisation,
+  foragingvisualisation,
+  transactionvisualisation,
   resourcesvisualisation,
   rolesvisualisation,
+  achievementsvisualisation,
+  metricsvisualisation,
+  iigopaymentsvisualisation,
 } from '../../consts/paths'
 import { OutputJSONType } from '../../consts/types'
 import { GitHash } from '../../consts/info'
@@ -23,12 +27,30 @@ import {
   storeLocalVisOutput,
 } from './utils'
 import Game from './Game/Game'
-import IIFO from './IIFO/IIFO'
-import IITO from './IITO/IITO'
+import Foraging from './Foraging/Foraging'
+import Transactions from './Transactions/Transactions'
 import IIGO from './IIGO/IIGO'
+import IITO from './IITO/IITO'
 import Resources from './Resources/Resources'
 import Roles from './Roles/Roles'
+import IIGOPayments from './IIGOPayments/IIGOPayments'
+import Achievements from './Achievements/Achievements'
+import Metrics from './Metrics/Metrics'
 import FourOhFour from '../FourOhFour/FourOhFour'
+import styles from './Visualisations.module.css'
+import logo from '../../assets/logo/logo512.png'
+
+const VisualisationsHome = () => {
+  return (
+    <div className={styles.root}>
+      <h1>Visualisations</h1>
+      <p style={{ fontSize: '1.2em' }}>
+        Choose a visualisation category above to continue.
+      </p>
+      <img src={logo} className={styles.appLogo} alt="logo" />
+    </div>
+  )
+}
 
 const Visualisations = () => {
   const [output, setOutput] = useState<OutputJSONType | undefined>(undefined)
@@ -44,7 +66,6 @@ const Visualisations = () => {
       const o = await loadLocalVisOutput()
       if (o) {
         setOutput(o)
-        history.push(gamevisualisation)
       }
     } catch (err) {
       // if error, just assume not stored at all
@@ -163,9 +184,14 @@ const Visualisations = () => {
                     component={() => <IITO output={output} />}
                   />
                   <Route
-                    path={iifovisualisation}
+                    path={transactionvisualisation}
                     exact
-                    component={() => <IIFO output={output} />}
+                    component={() => <Transactions output={output} />}
+                  />
+                  <Route
+                    path={foragingvisualisation}
+                    exact
+                    component={() => <Foraging output={output} />}
                   />
                   <Route
                     path={rolesvisualisation}
@@ -173,9 +199,29 @@ const Visualisations = () => {
                     component={() => <Roles output={output} />}
                   />
                   <Route
+                    path={achievementsvisualisation}
+                    exact
+                    component={() => <Achievements output={output} />}
+                  />
+                  <Route
+                    path={metricsvisualisation}
+                    exact
+                    component={() => <Metrics output={output} />}
+                  />
+                  <Route
                     path={resourcesvisualisation}
                     exact
                     component={() => <Resources output={output} />}
+                  />
+                  <Route
+                    path={iigopaymentsvisualisation}
+                    exact
+                    component={() => <IIGOPayments output={output} />}
+                  />
+                  <Route
+                    path={visualisations}
+                    exact
+                    component={VisualisationsHome}
                   />
                   <Route component={FourOhFour} />
                 </Switch>

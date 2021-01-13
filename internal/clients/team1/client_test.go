@@ -23,9 +23,12 @@ func (h testServerHandle) GetGameConfig() config.ClientConfig {
 }
 
 func MakeTestClient(gamestate gamestate.ClientGameState) client {
-	c := NewClient(shared.Team1)
+	c := DefaultClient(shared.Team1)
 	c.Initialise(testServerHandle{
 		clientGameState: gamestate,
+		clientGameConfig: config.ClientConfig{
+			CostOfLiving: 10,
+		},
 	})
 	return *c.(*client)
 }

@@ -3,11 +3,12 @@ package team3
 // General client functions
 
 import (
+	"github.com/SOMAS2020/SOMAS2020/internal/clients/team3/adv"
+	"github.com/SOMAS2020/SOMAS2020/internal/clients/team3/dynamics"
 	"math"
 	"math/rand"
 
 	"github.com/SOMAS2020/SOMAS2020/internal/common/baseclient"
-	"github.com/SOMAS2020/SOMAS2020/internal/common/roles"
 	"github.com/SOMAS2020/SOMAS2020/internal/common/rules"
 	"github.com/SOMAS2020/SOMAS2020/internal/common/shared"
 )
@@ -28,6 +29,8 @@ func (c *client) StartOfTurn() {
 
 	// update Trust Scores at the start of every turn
 	c.updateTrustScore(c.trustMapAgg)
+	c.Logf("[TEAM3]: Trust Score Map: %v", c.trustScore)
+
 	c.updateTheirTrustScore(c.theirTrustMapAgg)
 
 	// Initialise trustMap and theirtrustMap local cache to empty maps
@@ -42,20 +45,30 @@ func (c *client) StartOfTurn() {
 	c.updateCompliance()
 	c.lastSanction = c.iigoInfo.sanctions.ourSanction
 
-	c.updateCriticalThreshold(c.ServerReadHandle.GetGameState().ClientInfo.LifeStatus, c.ServerReadHandle.GetGameState().ClientInfo.Resources)
-
 	c.resetIIGOInfo()
+	c.account.UpdatePersonalPool(c.ServerReadHandle.GetGameState().ClientInfo.Resources)
+	c.account.Cycle()
 	c.Logf("Our Status: %+v\n", c.ServerReadHandle.GetGameState().ClientInfo)
 }
 
 func (c *client) Initialise(serverReadHandle baseclient.ServerReadHandle) {
 	c.ServerReadHandle = serverReadHandle
-	c.LocalVariableCache = rules.CopyVariableMap()
-	c.ourSpeaker = speaker{c: c}
-	c.ourJudge = judge{c: c}
-	c.ourPresident = president{c: c}
-
+	c.LocalVariableCache = rules.CopyVariableMap(c.ServerReadHandle.GetGameState().RulesInfo.VariableMap)
+	c.ourSpeaker = speaker{c: c, BaseSpeaker: &baseclient.BaseSpeaker{GameState: c.ServerReadHandle.GetGameState()}}
+	c.ourJudge = judge{c: c, BaseJudge: &baseclient.BaseJudge{GameState: c.ServerReadHandle.GetGameState()}}
+	c.ourPresident = president{c: c, BasePresident: &baseclient.BasePresident{GameState: c.ServerReadHandle.GetGameState()}}
 	c.initgiftOpinions()
+	if c.params.advType != adv.NoAdv {
+		if c.params.advType == adv.MaliceAdv {
+			c.params.adv = &adv.Malice{}
+			c.params.adv.Initialise(c.GetID())
+		} else if c.params.advType == adv.TargetAdv {
+			c.params.adv = &adv.Target{TargetID: shared.ClientID(rand.Intn(len(c.ServerReadHandle.GetGameState().ClientLifeStatuses)))}
+			c.params.adv.Initialise(c.GetID())
+		}
+	} else {
+		c.params.adv = nil
+	}
 
 	// Set trust scores
 	c.trustScore = make(map[shared.ClientID]float64)
@@ -63,26 +76,35 @@ func (c *client) Initialise(serverReadHandle baseclient.ServerReadHandle) {
 	//c.localVariableCache = rules.CopyVariableMap()
 	for _, islandID := range shared.TeamIDs {
 		// Initialise trust scores for all islands except our own
-		if islandID == c.BaseClient.GetID() {
+		if islandID == c.GetID() {
 			continue
 		}
 		c.trustScore[islandID] = 50
 		c.theirTrustScore[islandID] = 50
 	}
 
+	c.locationService.changeStrategy(c.params)
+
 	// Set our trust in ourselves to 100
-	c.theirTrustScore[id] = 100
+	c.theirTrustScore[c.GetID()] = 100
 
 	c.iigoInfo = iigoCommunicationInfo{
 		sanctions: &sanctionInfo{
-			tierInfo:        make(map[roles.IIGOSanctionTier]roles.IIGOSanctionScore),
-			rulePenalties:   make(map[string]roles.IIGOSanctionScore),
-			islandSanctions: make(map[shared.ClientID]roles.IIGOSanctionTier),
-			ourSanction:     roles.IIGOSanctionScore(0),
+			tierInfo:        make(map[shared.IIGOSanctionsTier]shared.IIGOSanctionsScore),
+			rulePenalties:   make(map[string]shared.IIGOSanctionsScore),
+			islandSanctions: make(map[shared.ClientID]shared.IIGOSanctionsTier),
+			ourSanction:     shared.IIGOSanctionsScore(0),
 		},
 	}
-	c.criticalStatePrediction.upperBound = serverReadHandle.GetGameState().ClientInfo.Resources
-	c.criticalStatePrediction.lowerBound = serverReadHandle.GetGameState().ClientInfo.Resources
+
+	c.criticalThreshold = serverReadHandle.GetGameConfig().MinimumResourceThreshold
+	c.minimumResourcesWeWant = c.criticalThreshold * (2 - shared.Resources(c.params.riskFactor))
+	c.initialResourcesAtStartOfGame = c.ServerReadHandle.GetGameState().ClientInfo.Resources
+	c.account = dynamics.Account{
+		Id:        c.GetID(),
+		TargetVal: shared.Resources(math.Min(float64(c.initialResourcesAtStartOfGame*2), float64(c.ServerReadHandle.GetGameState().CommonPool))),
+		Coeff:     1,
+	}
 }
 
 // updatetrustMapAgg adds the amount to the aggregate trust map list for given client
@@ -100,10 +122,9 @@ func (c *client) inittrustMapAgg() {
 	c.trustMapAgg = map[shared.ClientID][]float64{}
 
 	for _, islandID := range shared.TeamIDs {
-		if islandID+1 == c.BaseClient.GetID() {
-			continue
+		if islandID != c.GetID() {
+			c.trustMapAgg[islandID] = []float64{}
 		}
-		c.trustMapAgg[islandID] = []float64{}
 	}
 }
 
@@ -112,10 +133,9 @@ func (c *client) inittheirtrustMapAgg() {
 	c.theirTrustMapAgg = map[shared.ClientID][]float64{}
 
 	for _, islandID := range shared.TeamIDs {
-		if islandID+1 == c.BaseClient.GetID() {
-			continue
+		if islandID != c.GetID() {
+			c.theirTrustMapAgg[islandID] = []float64{}
 		}
-		c.theirTrustMapAgg[islandID] = []float64{}
 	}
 }
 
@@ -124,10 +144,9 @@ func (c *client) initgiftOpinions() {
 	c.giftOpinions = map[shared.ClientID]int{}
 
 	for _, islandID := range shared.TeamIDs {
-		if islandID+1 == c.BaseClient.GetID() {
-			continue
+		if islandID != c.GetID() {
+			c.giftOpinions[islandID] = 10
 		}
-		c.giftOpinions[islandID] = 10
 	}
 }
 
@@ -168,7 +187,7 @@ func (c *client) updateTheirTrustScore(theirTrustMapAgg map[shared.ClientID][]fl
 func (c *client) evalJudgePerformance() {
 	previousJudgeID := c.iigoInfo.startOfTurnJudgeID
 	previousPresidentID := c.iigoInfo.startOfTurnPresidentID
-	evalOfJudge := float64(c.judgePerformance[previousJudgeID])
+	evalOfJudge := c.judgePerformance[previousJudgeID]
 
 	// If the judge didn't evaluate the speaker, the judge didn't do a good job
 	if c.iigoInfo.monitoringDeclared[shared.Speaker] == false {
@@ -202,7 +221,7 @@ func (c *client) evalJudgePerformance() {
 	// Did the judge sanction us?
 	sanctionAmount := c.iigoInfo.sanctions.ourSanction
 	evalOfJudge -= float64(sanctionAmount) * c.params.sensitivity
-
+	c.judgePerformance[previousJudgeID] = evalOfJudge
 }
 
 // Internal function that evaluates the performance of the president for the purposes of opinion formation.
@@ -210,7 +229,7 @@ func (c *client) evalJudgePerformance() {
 func (c *client) evalPresidentPerformance() {
 	previousSpeakerID := c.iigoInfo.startOfTurnSpeakerID
 	previousPresidentID := c.iigoInfo.startOfTurnPresidentID
-	evalOfPresident := float64(c.presidentPerformance[previousPresidentID])
+	evalOfPresident := c.presidentPerformance[previousPresidentID]
 
 	// If the president didn't evaluate the judge, the president didn't do a good job
 	if c.iigoInfo.monitoringDeclared[shared.Judge] == false {
@@ -250,6 +269,7 @@ func (c *client) evalPresidentPerformance() {
 	// If our third choice was voted in (ourRankingChosen == 2), no effect on President Performance.
 	// Anything better/worse than third is rewarded/penalized proportionally.
 	evalOfPresident += c.params.sensitivity * float64((2 - ourRankingChosen))
+	c.presidentPerformance[previousPresidentID] = evalOfPresident
 }
 
 // Internal function that evaluates the performance of the speaker for the purposes of opinion formation.
@@ -278,7 +298,13 @@ func (c *client) evalSpeakerPerformance() {
 	}
 
 	ruleVoteInfo := *c.iigoInfo.ruleVotingResults[c.ruleVotedOn]
-	if ruleVoteInfo.ourVote != ruleVoteInfo.result {
+	var ourVote bool
+	if ruleVoteInfo.ourVote == shared.Approve {
+		ourVote = true
+	} else {
+		ourVote = false
+	}
+	if ourVote != ruleVoteInfo.result {
 		evalOfSpeaker += c.params.sensitivity
 	} else {
 		evalOfSpeaker -= c.params.sensitivity
@@ -296,29 +322,7 @@ func (c *client) evalSpeakerPerformance() {
 	// If our third choice was voted in (ourRankingChosen == 2), no effect on President Performance.
 	// Anything better/worse than third is rewarded/penalized proportionally.
 	evalOfSpeaker += c.params.sensitivity * float64((2 - ourRankingChosen))
-}
-
-//updateCriticalThreshold updates our predicted value of what is the resources threshold of critical state
-// it uses estimated resources to find these bound. isIncriticalState is a boolean to indicate if the island
-// is in the critical state and the estimated resources is our estimated resources of the island i.e.
-// trust-adjusted resources.
-func (c *client) updateCriticalThreshold(state shared.ClientLifeStatus, estimatedResource shared.Resources) {
-	isInCriticalState := state == shared.Critical
-	if !isInCriticalState {
-		if estimatedResource < c.criticalStatePrediction.upperBound {
-			c.criticalStatePrediction.upperBound = estimatedResource
-			if c.criticalStatePrediction.upperBound < c.criticalStatePrediction.lowerBound {
-				c.criticalStatePrediction.lowerBound = estimatedResource
-			}
-		}
-	} else {
-		if estimatedResource > c.criticalStatePrediction.lowerBound {
-			c.criticalStatePrediction.lowerBound = estimatedResource
-			if c.criticalStatePrediction.upperBound < c.criticalStatePrediction.lowerBound {
-				c.criticalStatePrediction.upperBound = estimatedResource
-			}
-		}
-	}
+	c.speakerPerformance[previousSpeakerID] = evalOfSpeaker
 }
 
 // updateCompliance updates the compliance variable at the beginning of each turn.
@@ -330,7 +334,7 @@ func (c *client) updateCompliance() {
 		c.numTimeCaught++
 	} else {
 		c.compliance = c.params.complianceLevel + (1.0-c.params.complianceLevel)*
-			math.Exp(-float64(c.timeSinceCaught)/math.Pow((float64(c.numTimeCaught)+1.0), c.params.recidivism))
+			math.Exp(-float64(c.timeSinceCaught)/float64(c.numTimeCaught)+1.0)
 		c.timeSinceCaught++
 	}
 }
@@ -354,16 +358,6 @@ func (c *client) ResourceReport() shared.ResourcesReport {
 	if c.areWeCritical() || !c.shouldICheat() {
 		return shared.ResourcesReport{ReportedAmount: resource, Reported: true}
 	}
-	skewedResource := resource / shared.Resources(c.params.resourcesSkew)
+	skewedResource := safeDivResources(resource, shared.Resources(c.params.resourcesSkew))
 	return shared.ResourcesReport{ReportedAmount: skewedResource, Reported: true}
 }
-
-/*
-	DisasterNotification(disasters.DisasterReport, map[shared.ClientID]shared.Magnitude)
-	updateCompliance
-	shouldICheat
-	updateCriticalThreshold
-	evalPresidentPerformance
-	evalSpeakerPerformance
-	evalJudgePerformance
-*/

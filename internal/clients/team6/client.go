@@ -2,8 +2,11 @@
 package team6
 
 import (
+	"math"
+
 	"github.com/SOMAS2020/SOMAS2020/internal/common/baseclient"
 	"github.com/SOMAS2020/SOMAS2020/internal/common/disasters"
+	"github.com/SOMAS2020/SOMAS2020/internal/common/rules"
 	"github.com/SOMAS2020/SOMAS2020/internal/common/shared"
 )
 
@@ -22,96 +25,120 @@ type client struct {
 	disastersHistory      DisastersHistory
 	disasterPredictions   DisasterPredictions
 	forageHistory         ForageHistory
-	payingTax             shared.Resources
+	taxDemanded           shared.Resources
+	sanctionDemanded      shared.Resources
+	allocationAllowed     shared.Resources
 
 	clientConfig ClientConfig
 }
 
-func init() {
-	baseclient.RegisterClient(id, NewClient(id))
+// DefaultClient creates the client that will be used for most simulations. All
+// other personalities are considered alternatives. To give a different
+// personality for your agent simply create another (exported) function with the
+// same signature as "DefaultClient" that creates a different agent, and inform
+// someone on the simulation team that you would like it to be included in
+// testing
+func DefaultClient(id shared.ClientID) baseclient.Client {
+	return NewClient(id)
 }
-
-// ########################
-// ######  General  #######
-// ########################
 
 // NewClient creates a client objects for our island
 func NewClient(clientID shared.ClientID) baseclient.Client {
 	return &client{
-		BaseClient:            baseclient.NewClient(clientID),
-		friendship:            friendship,
-		trustRank:             trustRank,
-		giftsSentHistory:      giftsSentHistory,
-		giftsReceivedHistory:  giftsReceivedHistory,
-		giftsRequestedHistory: giftsRequestedHistory,
-		forageHistory:         forageHistory,
-		disastersHistory:      disastersHistory,
-		disasterPredictions:   disasterPredictions,
-		clientConfig:          clientConfig,
+		BaseClient:   baseclient.NewClient(clientID),
+		clientConfig: getClientConfig(),
 	}
 }
 
-// ------ TODO: OPTIONAL ------
 func (c *client) Initialise(serverReadHandle baseclient.ServerReadHandle) {
 	c.ServerReadHandle = serverReadHandle
+	c.LocalVariableCache = rules.CopyVariableMap(serverReadHandle.GetGameState().RulesInfo.VariableMap)
+
+	c.friendship = Friendship{}
+	c.trustRank = TrustRank{}
+	c.giftsSentHistory = GiftsSentHistory{}
+	c.giftsReceivedHistory = GiftsReceivedHistory{}
+	c.giftsRequestedHistory = GiftsRequestedHistory{}
+	c.disastersHistory = DisastersHistory{}
+	c.disasterPredictions = DisasterPredictions{}
+	c.forageHistory = ForageHistory{}
+	c.taxDemanded = 0.0
+	c.sanctionDemanded = 0.0
+	c.allocationAllowed = 0.0
+
+	for _, team := range shared.TeamIDs {
+		if team == c.GetID() {
+			c.friendship[team] = c.clientConfig.maxFriendship
+			c.trustRank[team] = 1
+
+			continue
+		}
+
+		c.friendship[team] = 50
+		c.trustRank[team] = 0.5
+	}
+
+	c.updateConfig()
 }
 
 func (c *client) StartOfTurn() {
-	defer c.Logf("There are [%v] islands left in this game", c.getNumOfAliveIslands())
+	defer c.Logf("There are %v islands left in this game", c.getNumOfAliveIslands())
+
+	for _, team := range shared.TeamIDs[:] {
+		if team == c.GetID() {
+			continue
+		}
+		if c.giftsReceivedHistory[team] == 0 && c.ServerReadHandle.GetGameState().Turn != 1 {
+			c.lowerFriendshipLevel(team, 99*c.clientConfig.friendshipChangingRate)
+		}
+	}
 
 	c.updateConfig()
-	c.updateFriendship()
 }
 
 // updateConfig will be called at the start of each turn to set the newest config
 func (c *client) updateConfig() {
-	defer c.Logf("Agent[%v] configuration has been updated", c.BaseClient.GetID())
+	defer c.Logf("Configuration status: %v", c.clientConfig)
 
-	ourResources := c.ServerReadHandle.GetGameState().ClientInfo.Resources
-	criticalCounter := c.ServerReadHandle.GetGameState().ClientInfo.CriticalConsecutiveTurnsCounter
 	minThreshold := c.ServerReadHandle.GetGameConfig().MinimumResourceThreshold
 	costOfLiving := c.ServerReadHandle.GetGameConfig().CostOfLiving
-	maxCriticalCounter := c.ServerReadHandle.GetGameConfig().MaxCriticalConsecutiveTurns
 
 	updatedConfig := ClientConfig{
-		minFriendship:          0.0,
-		maxFriendship:          100.0,
-		friendshipChangingRate: 20.0,
-		selfishThreshold:       minThreshold + 3.0*costOfLiving + ourResources/10.0,
-		normalThreshold:        minThreshold + 6.0*costOfLiving + ourResources/10.0,
-		payingTax:              shared.Resources(criticalCounter / maxCriticalCounter),
+		minFriendship:          c.clientConfig.minFriendship,
+		maxFriendship:          c.clientConfig.maxFriendship,
+		friendshipChangingRate: c.clientConfig.friendshipChangingRate,
+		selfishThreshold:       minThreshold + 3.0*costOfLiving + c.ServerReadHandle.GetGameState().CommonPool/12.0,
+		normalThreshold:        minThreshold + 12.0*costOfLiving + c.ServerReadHandle.GetGameState().CommonPool/6.0,
+		multiplier:             c.clientConfig.multiplier,
 	}
 
 	c.clientConfig = ClientConfig(updatedConfig)
 }
 
-// updateFriendship will be called at the start of each turn to update our friendships
-func (c *client) updateFriendship() {
-	defer c.Logf("Agent[%v] friendship information has been updated", c.BaseClient.GetID())
+// updateFriendship will be called every time a gift is exchanged; neg for sending, pos for receiving
+func (c *client) updateFriendship(giftAmount shared.Resources, team shared.ClientID) {
+	defer c.Logf("Friendship status: %v", c.friendship)
 
-	for team, requested := range c.giftsRequestedHistory {
-		if c.ServerReadHandle.GetGameState().ClientLifeStatuses[team] != shared.Alive {
-			// doesn't judge if they are not able to survive themselves
-			continue
-		} else {
-			received := c.giftsReceivedHistory[team]
-			offered := c.giftsSentHistory[team]
+	friendshipChangingRate := c.clientConfig.friendshipChangingRate
+	receivedSum := c.giftsReceivedHistory[team]
+	sentSum := c.giftsSentHistory[team]
+	requestedSum := c.giftsReceivedHistory[team]
 
-			if received < offered && received < requested {
-				// will be sad if the island give us very little
-				c.lowerFriendshipLevel(team, c.clientConfig.friendshipChangingRate*FriendshipLevel(offered/(received+requested+shared.Resources(1.0))))
-			} else if received >= offered && received >= requested {
-				c.raiseFriendshipLevel(team, c.clientConfig.friendshipChangingRate*FriendshipLevel(received/(offered+requested+shared.Resources(1.0))))
-			} else {
-				// keeps the current friendship level
-				continue
-			}
-		}
+	if sentSum+requestedSum+receivedSum == 0 {
+		return
 	}
+
+	if receivedSum >= sentSum && giftAmount > 0 {
+		c.raiseFriendshipLevel(team, friendshipChangingRate*FriendshipLevel(receivedSum-sentSum+giftAmount))
+	} else if receivedSum < sentSum && giftAmount < 0 {
+		c.lowerFriendshipLevel(team, friendshipChangingRate*FriendshipLevel(sentSum-receivedSum-giftAmount))
+	}
+
 }
 
 func (c *client) DisasterNotification(dR disasters.DisasterReport, effects disasters.DisasterEffects) {
-	// TODO: effects may be recorded
+	defer c.Logf("Trust rank status: %v", c.trustRank)
+
 	currTurn := c.ServerReadHandle.GetGameState().Turn
 
 	disasterhappening := baseclient.DisasterInfo{
@@ -121,9 +148,25 @@ func (c *client) DisasterNotification(dR disasters.DisasterReport, effects disas
 		Turn:        currTurn,
 	}
 
-	//for team, prediction := range c.receivedDisasterPredictions {
-	// TODO: increases the trust rank based on the predictions
-	//}
+	ourDiff := math.Abs(c.disasterPredictions[c.GetID()].Magnitude - disasterhappening.Magnitude)
+	theirDiff := float64(0)
+
+	for team, prediction := range c.disasterPredictions {
+		theirDiff = math.Abs(prediction.Magnitude - disasterhappening.Magnitude)
+
+		if ourDiff != 0 {
+			c.trustRank[team] += (ourDiff - theirDiff) / ourDiff
+		} else {
+			c.trustRank[team] = c.trustRank[team] / float64(2)
+		}
+
+		// sets the caps of trust ranks from 0 to 1
+		if c.trustRank[team] < 0 {
+			c.trustRank[team] = 0
+		} else if c.trustRank[team] > 1 {
+			c.trustRank[team] = 1
+		}
+	}
 
 	c.disastersHistory = append(c.disastersHistory, disasterhappening)
 }

@@ -15,6 +15,7 @@ import (
 // Client is a base interface to be implemented by each client struct.
 type Client interface {
 	Echo(s string) string
+
 	GetID() shared.ClientID
 	Initialise(ServerReadHandle)
 	StartOfTurn()
@@ -39,7 +40,7 @@ type Client interface {
 
 	//Foraging
 	DecideForage() (shared.ForageDecision, error)
-	ForageUpdate(shared.ForageDecision, shared.Resources)
+	ForageUpdate(shared.ForageDecision, shared.Resources, uint)
 
 	//Disasters
 	DisasterNotification(disasters.DisasterReport, disasters.DisasterEffects)
@@ -113,7 +114,7 @@ func (c *BaseClient) GetID() shared.ClientID {
 // You will need it to access the game state through its GetGameStateMethod.
 func (c *BaseClient) Initialise(serverReadHandle ServerReadHandle) {
 	c.ServerReadHandle = serverReadHandle
-	c.LocalVariableCache = rules.CopyVariableMap()
+	c.LocalVariableCache = rules.CopyVariableMap(c.ServerReadHandle.GetGameState().RulesInfo.VariableMap)
 }
 
 // StartOfTurn handles the start of a new turn.

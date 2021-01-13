@@ -1,32 +1,44 @@
 package team6
 
 import (
+	"github.com/SOMAS2020/SOMAS2020/internal/common/baseclient"
 	"github.com/SOMAS2020/SOMAS2020/internal/common/roles"
 	"github.com/SOMAS2020/SOMAS2020/internal/common/shared"
 )
 
 func (c *client) GetClientPresidentPointer() roles.President {
-	return &president{client: c}
+	return &president{client: c, BasePresident: &baseclient.BasePresident{GameState: c.ServerReadHandle.GetGameState()}}
 }
 
 func (c *client) GetClientJudgePointer() roles.Judge {
-	return &judge{client: c}
+	return &judge{client: c, BaseJudge: &baseclient.BaseJudge{GameState: c.ServerReadHandle.GetGameState()}}
 }
 
 func (c *client) GetClientSpeakerPointer() roles.Speaker {
-	return &speaker{client: c}
+	return &speaker{client: c, BaseSpeaker: &baseclient.BaseSpeaker{GameState: c.ServerReadHandle.GetGameState()}}
 }
 
-// func (c *client) ReceiveCommunication(sender shared.ClientID, data map[shared.CommunicationFieldName]shared.CommunicationContent) {
-// 	for fieldName, content := range data {
-// 		switch fieldName {
-// 		case shared.TaxAmount:
-// 			c.config.payingTax = shared.Resources(content.IntegerData)
-// 		} //add sth else
-// 	}
-// }
+func (c *client) ReceiveCommunication(sender shared.ClientID, data map[shared.CommunicationFieldName]shared.CommunicationContent) {
+	for fieldName, content := range data {
+		switch fieldName {
+		case shared.IIGOTaxDecision:
+			c.taxDemanded = shared.Resources(content.IIGOValueData.Amount)
+		case shared.SanctionAmount:
+			c.sanctionDemanded = shared.Resources(content.IntegerData)
+		case shared.IIGOAllocationDecision:
+			c.allocationAllowed = shared.Resources(content.IIGOValueData.Amount)
+		default:
+		}
+	}
+}
 
 func (c *client) MonitorIIGORole(roleName shared.Role) bool {
+	currPresident := c.ServerReadHandle.GetGameState().PresidentID
+
+	if currPresident == c.GetID() {
+		return true
+	}
+
 	return false
 }
 
@@ -37,21 +49,57 @@ func (c *client) DecideIIGOMonitoringAnnouncement(monitoringResult bool) (result
 }
 
 func (c *client) CommonPoolResourceRequest() shared.Resources {
+	ourPersonality := c.getPersonality()
+	numberAlive := shared.Resources(c.getNumOfAliveIslands())
+	livingCost := c.ServerReadHandle.GetGameConfig().CostOfLiving
 	minThreshold := c.ServerReadHandle.GetGameConfig().MinimumResourceThreshold
-	ownResources := c.ServerReadHandle.GetGameState().ClientInfo.Resources
-	if ownResources > minThreshold { //if current resource > threshold, our agent skip to request resource from common pool
-		return 0
+	ourResources := c.ServerReadHandle.GetGameState().ClientInfo.Resources
+	ourStatus := c.ServerReadHandle.GetGameState().ClientInfo.LifeStatus
+	cprLeft := c.ServerReadHandle.GetGameState().CommonPool
+	reqResource := shared.Resources(3.0 * livingCost)
+
+	if ourStatus == shared.Critical && ourResources < minThreshold {
+		return minThreshold - ourResources
 	}
-	return minThreshold - ownResources
+
+	//when common pool does not have enough resource, will not request
+	if ourPersonality == Generous && cprLeft/numberAlive < livingCost {
+		reqResource = livingCost
+	}
+
+	c.Logf("Request %v from common pool", reqResource)
+
+	return reqResource
 }
 
 func (c *client) RequestAllocation() shared.Resources {
-	//we will take 10% of the common pool when we are critical or dying
+	resourceTaken := c.allocationAllowed
+	numberAlive := shared.Resources(c.getNumOfAliveIslands())
 	ourStatus := c.ServerReadHandle.GetGameState().ClientInfo.LifeStatus
-	if ourStatus == shared.Critical || ourStatus == shared.Dead {
-		return c.ServerReadHandle.GetGameState().CommonPool / 10
+	ourPersonality := c.getPersonality()
+	minThreshold := c.ServerReadHandle.GetGameConfig().MinimumResourceThreshold
+	livingCost := c.ServerReadHandle.GetGameConfig().CostOfLiving
+	commonPool := c.ServerReadHandle.GetGameState().CommonPool
+	ourResources := c.ServerReadHandle.GetGameState().ClientInfo.Resources
+
+	//if we are critical or dying
+	if c.ServerReadHandle.GetGameState().ClientInfo.CriticalConsecutiveTurnsCounter == 2 {
+		if ourResources < minThreshold {
+			return minThreshold - ourResources
+		}
 	}
-	return 0
+
+	if ourStatus == shared.Critical {
+		return minThreshold - ourResources + livingCost
+	}
+
+	if numberAlive <= 1 {
+		return commonPool
+	} else if ourPersonality == Selfish && c.allocationAllowed < livingCost && commonPool >= livingCost*numberAlive {
+		resourceTaken = livingCost
+	}
+
+	return resourceTaken
 }
 
 func (c *client) ResourceReport() shared.ResourcesReport {
@@ -63,7 +111,7 @@ func (c *client) ResourceReport() shared.ResourcesReport {
 		Reported:       true,
 	}
 
-	if ourPersonality == Selfish {
+	if ourPersonality == Generous {
 		return fakeReport
 	}
 
@@ -74,14 +122,37 @@ func (c *client) ResourceReport() shared.ResourcesReport {
 }
 
 func (c *client) GetTaxContribution() shared.Resources {
+	payTax := c.taxDemanded
+	prediction, ok := c.disasterPredictions[c.GetID()]
+	ourResources := c.ServerReadHandle.GetGameState().ClientInfo.Resources
 	ourPersonality := c.getPersonality()
-	if ourPersonality == Selfish { //evade tax when we are selfish
+	ourStatus := c.ServerReadHandle.GetGameState().ClientInfo.LifeStatus
+	minThreshold := c.ServerReadHandle.GetGameConfig().MinimumResourceThreshold
+
+	if ourStatus == shared.Critical {
 		return 0
+	} else if ourResources-c.taxDemanded < minThreshold {
+		payTax = ourResources - minThreshold
 	}
-	return c.clientConfig.payingTax
+
+	if ok && prediction.TimeLeft < 1 && ourPersonality == Generous {
+		payTax = shared.Resources(prediction.Magnitude*prediction.Confidence/3) + c.taxDemanded
+	}
+
+	return payTax
 }
 
-// ------ TODO: COMPULSORY -----
 func (c *client) GetSanctionPayment() shared.Resources {
-	return 0
+	paySanction := c.sanctionDemanded
+	ourResources := c.ServerReadHandle.GetGameState().ClientInfo.Resources
+	ourStatus := c.ServerReadHandle.GetGameState().ClientInfo.LifeStatus
+	minThreshold := c.ServerReadHandle.GetGameConfig().MinimumResourceThreshold
+
+	if ourStatus == shared.Critical {
+		return 0
+	} else if ourResources-c.sanctionDemanded < minThreshold {
+		paySanction = ourResources - minThreshold
+	}
+
+	return paySanction
 }

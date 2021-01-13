@@ -8,52 +8,46 @@ import (
 	"github.com/SOMAS2020/SOMAS2020/internal/common/shared"
 )
 
-/*
-	//IIFO: OPTIONAL
-	MakeDisasterPrediction() shared.DisasterPredictionInfo
-	ReceiveDisasterPredictions(receivedPredictions shared.ReceivedDisasterPredictionsDict)
-	MakeForageInfo() shared.ForageShareInfo
-	ReceiveForageInfo([]shared.ForageShareInfo)
-
-	//IITO: COMPULSORY
-	GetGiftRequests() shared.GiftRequestDict
-	GetGiftOffers(receivedRequests shared.GiftRequestDict) shared.GiftOfferDict
-	GetGiftResponses(receivedOffers shared.GiftOfferDict) shared.GiftResponseDict
-	UpdateGiftInfo(receivedResponses shared.GiftResponseDict)
-
-	//TODO: THESE ARE NOT DONE yet, how do people think we should implement the actual transfer?
-	// The server should handle the below functions maybe?
-	SentGift(sent shared.Resources, to shared.ClientID)
-	ReceivedGift(received shared.Resources, from shared.ClientID)
-
-*/
-
 func (c *client) MakeDisasterPrediction() shared.DisasterPredictionInfo {
-	// Use the sample mean of each field as our prediction
-	meanDisaster := getMeanDisaster(c.pastDisastersList)
 
-	prediction := shared.DisasterPrediction{
-		CoordinateX: meanDisaster.CoordinateX,
-		CoordinateY: meanDisaster.CoordinateY,
-		Magnitude:   meanDisaster.Magnitude,
-		TimeLeft:    uint(meanDisaster.Turn),
-	}
-
-	// Use (variance limit - mean(sample variance)), where the mean is taken over each field, as confidence
-	// Use a variance limit of 100 for now
-	varianceLimit := 100.0
-	prediction.Confidence = determineConfidence(c.pastDisastersList, meanDisaster, varianceLimit)
-
-	// For MVP, share this prediction with all islands since trust has not yet been implemented
-	trustedIslands := make([]shared.ClientID, len(baseclient.RegisteredClients))
+	var predictionInfo shared.DisasterPredictionInfo
+	trustedIslands := make([]shared.ClientID, len(c.BaseClient.ServerReadHandle.GetGameState().ClientLifeStatuses))
 	for index, id := range shared.TeamIDs {
 		trustedIslands[index] = id
 	}
 
-	// Return all prediction info and store our own island's prediction in global variable
-	predictionInfo := shared.DisasterPredictionInfo{
-		PredictionMade: prediction,
-		TeamsOfferedTo: trustedIslands,
+	if len(c.pastDisastersList) == 0 {
+		predictionInfo = shared.DisasterPredictionInfo{
+			PredictionMade: shared.DisasterPrediction{
+				CoordinateX: 0,
+				CoordinateY: 0,
+				Magnitude:   0,
+				TimeLeft:    0,
+				Confidence:  0,
+			},
+			TeamsOfferedTo: trustedIslands,
+		}
+	} else {
+		// Use the sample mean of each field as our prediction
+		meanDisaster := getMeanDisaster(c.pastDisastersList)
+
+		prediction := shared.DisasterPrediction{
+			CoordinateX: meanDisaster.CoordinateX,
+			CoordinateY: meanDisaster.CoordinateY,
+			Magnitude:   meanDisaster.Magnitude,
+			TimeLeft:    uint(meanDisaster.Turn),
+		}
+
+		// Use (variance limit - mean(sample variance)), where the mean is taken over each field, as confidence
+		// Use a variance limit of 100 for now
+		varianceLimit := 100.0
+		prediction.Confidence = determineConfidence(c.pastDisastersList, meanDisaster, varianceLimit)
+
+		// Return all prediction info and store our own island's prediction in global variable
+		predictionInfo = shared.DisasterPredictionInfo{
+			PredictionMade: prediction,
+			TeamsOfferedTo: trustedIslands,
+		}
 	}
 
 	if len(c.disasterPredictions) < int(c.ServerReadHandle.GetGameState().Turn) {
@@ -116,19 +110,19 @@ func (c *client) ReceiveDisasterPredictions(receivedPredictions shared.ReceivedD
 	selfConfidence := c.disasterPredictions[int(c.ServerReadHandle.GetGameState().Turn)-1][c.GetID()].Confidence
 
 	// Initialise running totals using our own island's predictions
-	totalCoordinateX := c.trustScore[c.GetID()] * selfConfidence * c.disasterPredictions[int(c.ServerReadHandle.GetGameState().Turn)-1][c.GetID()].CoordinateX
-	totalCoordinateY := c.trustScore[c.GetID()] * selfConfidence * c.disasterPredictions[int(c.ServerReadHandle.GetGameState().Turn)-1][c.GetID()].CoordinateY
-	totalMagnitude := c.trustScore[c.GetID()] * selfConfidence * c.disasterPredictions[int(c.ServerReadHandle.GetGameState().Turn)-1][c.GetID()].Magnitude
-	totalTimeLeft := uint(math.Round(c.trustScore[c.GetID()]*selfConfidence)) * c.disasterPredictions[int(c.ServerReadHandle.GetGameState().Turn)-1][c.GetID()].TimeLeft
-	totalConfidence := c.trustScore[c.GetID()] * selfConfidence
+	totalCoordinateX := selfConfidence * c.disasterPredictions[int(c.ServerReadHandle.GetGameState().Turn)-1][c.GetID()].CoordinateX
+	totalCoordinateY := selfConfidence * c.disasterPredictions[int(c.ServerReadHandle.GetGameState().Turn)-1][c.GetID()].CoordinateY
+	totalMagnitude := selfConfidence * c.disasterPredictions[int(c.ServerReadHandle.GetGameState().Turn)-1][c.GetID()].Magnitude
+	totalTimeLeft := uint(math.Round(selfConfidence)) * c.disasterPredictions[int(c.ServerReadHandle.GetGameState().Turn)-1][c.GetID()].TimeLeft
+	totalConfidence := selfConfidence
 
 	// Add other island's predictions using their confidence values
 	for islandID, prediction := range receivedPredictions {
-		totalCoordinateX += c.trustScore[islandID] * prediction.PredictionMade.Confidence * prediction.PredictionMade.CoordinateX
-		totalCoordinateY += c.trustScore[islandID] * prediction.PredictionMade.Confidence * prediction.PredictionMade.CoordinateY
-		totalMagnitude += c.trustScore[islandID] * prediction.PredictionMade.Confidence * prediction.PredictionMade.Magnitude
-		totalTimeLeft += uint(math.Round(c.trustScore[islandID]*prediction.PredictionMade.Confidence)) * prediction.PredictionMade.TimeLeft
-		totalConfidence += c.trustScore[islandID] * prediction.PredictionMade.Confidence
+		totalCoordinateX += safeDivFloat(c.trustScore[islandID], 100*prediction.PredictionMade.Confidence*prediction.PredictionMade.CoordinateX)
+		totalCoordinateY += safeDivFloat(c.trustScore[islandID], 100*prediction.PredictionMade.Confidence*prediction.PredictionMade.CoordinateY)
+		totalMagnitude += safeDivFloat(c.trustScore[islandID], 100*prediction.PredictionMade.Confidence*prediction.PredictionMade.Magnitude)
+		totalTimeLeft += uint(math.Round(safeDivFloat(c.trustScore[islandID], 100*prediction.PredictionMade.Confidence))) * prediction.PredictionMade.TimeLeft
+		totalConfidence += safeDivFloat(c.trustScore[islandID], 100*prediction.PredictionMade.Confidence)
 	}
 
 	// Finally get the final prediction generated by considering predictions from all islands that we have available
@@ -151,37 +145,43 @@ func (c *client) ReceiveDisasterPredictions(receivedPredictions shared.ReceivedD
 // Strategy: We cover the risk that we lose money from the islands that we don’t trust with
 // what we get from the islands that we do trust. Also, we don't request any gifts from critical islands.
 func (c *client) GetGiftRequests() shared.GiftRequestDict {
-	var totalRequestAmt float64
+	var totalRequestAmt, avgRequestAmt float64
 
 	requests := shared.GiftRequestDict{}
 
 	localPool := c.getLocalResources()
 
-	resourcesNeeded := c.params.localPoolThreshold - float64(localPool)
+	resourcesNeeded := float64(c.initialResourcesAtStartOfGame - localPool)
 	//fmt.Println("resources needed: ", resourcesNeeded)
 	if resourcesNeeded > 0 {
 		resourcesNeeded *= (1 + c.params.giftInflationPercentage)
 		totalRequestAmt = resourcesNeeded
 	} else {
-		totalRequestAmt = c.params.giftInflationPercentage * c.params.localPoolThreshold
+		totalRequestAmt = c.params.giftInflationPercentage * float64(c.initialResourcesAtStartOfGame)
 	}
 	//fmt.Println("total request amount: ", totalRequestAmt)
 
-	avgRequestAmt := totalRequestAmt / float64(c.getIslandsAlive()-c.getIslandsCritical())
+	// check to avoid division by 0 and only request from alive islands
+	if len(c.getAliveIslands()) != 0 {
+		avgRequestAmt = totalRequestAmt / float64(len(c.getAliveIslands()))
+	} else {
+		avgRequestAmt = totalRequestAmt
+	}
 
 	for island, status := range c.ServerReadHandle.GetGameState().ClientLifeStatuses {
-		if island == id {
+		if island == c.GetID() {
 			continue
 		}
 		if status == shared.Critical || status == shared.Dead {
 			requests[island] = shared.GiftRequest(0.0)
 		} else {
 			var requestAmt float64
-			requestAmt = avgRequestAmt * math.Pow(c.trustScore[island], c.params.trustParameter) * c.params.trustConstantAdjustor
+			requestAmt = avgRequestAmt * math.Pow(c.trustScore[island], c.params.riskFactor)
 			requests[island] = shared.GiftRequest(requestAmt)
 		}
 	}
 
+	//	c.Logf("[TEAM3]: Actual requests made: %v", requests)
 	c.requestedGiftAmounts = requests
 	return requests
 }
@@ -229,11 +229,17 @@ func (c *client) sigmoidAndNormalise(island shared.ClientID) shared.GiftOffer {
 func (c *client) GetGiftOffers(receivedRequests shared.GiftRequestDict) shared.GiftOfferDict {
 	offers := shared.GiftOfferDict{}
 
-	islandStatusCritical := c.isClientStatusCritical(id)
+	localPool := c.getLocalResources()
+	islandStatusCritical := c.isClientStatusCritical(c.GetID())
 
 	if islandStatusCritical {
 		for _, island := range c.getAliveIslands() {
 			offers[island] = 0.0
+		}
+		return offers
+	} else if localPool < c.initialResourcesAtStartOfGame*0.1 {
+		for _, island := range c.getAliveIslands() {
+			offers[island] = 0.01
 		}
 		return offers
 	}
@@ -250,8 +256,8 @@ func (c *client) GetGiftOffers(receivedRequests shared.GiftRequestDict) shared.G
 	//fmt.Println("original amounts: ", amounts)
 
 	for _, island := range c.getAliveIslands() {
-		if island != id && amounts[island] == 0.0 {
-			amounts[island] = shared.GiftOffer(c.trustScore[island] * c.params.NoRequestGiftParam)
+		if island != c.GetID() && amounts[island] == 0.0 {
+			amounts[island] = shared.GiftOffer(c.trustScore[island] * (c.params.friendliness / 30))
 		}
 	}
 
@@ -261,9 +267,7 @@ func (c *client) GetGiftOffers(receivedRequests shared.GiftRequestDict) shared.G
 		totalRequestedAmt += float64(requests)
 	}
 
-	localPool := c.getLocalResources()
-	giftBudget := shared.GiftOffer((float64(localPool) + totalRequestedAmt) * ((1 - c.params.selfishness) / 2))
-
+	giftBudget := shared.GiftOffer(float64(localPool) * ((1 - c.params.selfishness) / 2))
 	rankedIslands := make([]shared.ClientID, 0.0, len(c.trustScore))
 
 	for island := range c.trustScore {
@@ -315,9 +319,9 @@ func (c *client) GetGiftResponses(receivedOffers shared.GiftOfferDict) shared.Gi
 func (c *client) UpdateGiftInfo(receivedResponses shared.GiftResponseDict) {
 	for clientID, response := range receivedResponses {
 		if response.Reason == shared.DeclineDontLikeYou {
-			c.giftOpinions[clientID] -= 2
+			c.updatetrustMapAgg(clientID, -float64(5))
 		} else if response.Reason == shared.Ignored {
-			c.giftOpinions[clientID]--
+			c.updatetrustMapAgg(clientID, -float64(2.5))
 		}
 	}
 }
@@ -337,6 +341,7 @@ func (c *client) SentGift(sent shared.Resources, to shared.ClientID) {
 // and trust scores are then incremented and decremented based on the received difference.
 func (c *client) ReceivedGift(received shared.Resources, from shared.ClientID) {
 
+	c.Logf("Requested: %v and received: %v", c.requestedGiftAmounts[from], received)
 	requestedFromIsland := c.requestedGiftAmounts[from]
 	trustAdjustor := received - shared.Resources(requestedFromIsland)
 	newTrustScore := 10 + (trustAdjustor * 0.2)
@@ -353,5 +358,58 @@ func (c *client) ReceivedGift(received shared.Resources, from shared.ClientID) {
 // DecideGiftAmount is executed at the end of each turn and asks clients how much
 // they wish to fulfill a gift offer they have previously made.
 func (c *client) DecideGiftAmount(toTeam shared.ClientID, giftOffer shared.Resources) shared.Resources {
-	return giftOffer
+
+	// Other agent simply look at if we offered them more than suggested, so why not 0.5%
+	// more than we originally intended to offer. This would massively upgrade our opinion.
+	newOffer := giftOffer * 1.005
+	newOffer = shared.Resources(math.Min(float64(newOffer), float64(giftOffer+0.5)))
+	return newOffer
+}
+
+func (c *client) MakeForageInfo() shared.ForageShareInfo {
+
+	trustedIslands := make([]shared.ClientID, len(c.ServerReadHandle.GetGameState().ClientLifeStatuses))
+	for index, id := range shared.TeamIDs {
+		trustedIslands[index] = id
+	}
+
+	var lastDecision shared.ForageDecision
+	var lastForageOutput shared.Resources
+
+	for forageType, data := range c.forageData {
+		for _, forage := range data {
+			if uint(forage.turn) == c.ServerReadHandle.GetGameState().Turn-1 {
+				lastForageOutput = forage.amountReturned
+				lastDecision = shared.ForageDecision{
+					Type:         forageType,
+					Contribution: forage.amountContributed,
+				}
+			}
+		}
+	}
+
+	forageInfo := shared.ForageShareInfo{
+		DecisionMade:     lastDecision,
+		ResourceObtained: lastForageOutput,
+		ShareTo:          trustedIslands,
+	}
+
+	return forageInfo
+}
+
+func (c *client) ReceiveForageInfo(forageInfo []shared.ForageShareInfo) {
+	if c.ServerReadHandle.GetGameState().Turn == 1 {
+		c.forageData = make(map[shared.ForageType][]ForageData)
+	}
+	for _, val := range forageInfo {
+		c.forageData[val.DecisionMade.Type] =
+			append(
+				c.forageData[val.DecisionMade.Type],
+				ForageData{
+					amountContributed: val.DecisionMade.Contribution,
+					amountReturned:    val.ResourceObtained,
+					turn:              c.ServerReadHandle.GetGameState().Turn,
+				},
+			)
+	}
 }

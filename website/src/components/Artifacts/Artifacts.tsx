@@ -1,11 +1,10 @@
 import React from 'react'
 import { Table } from 'react-bootstrap'
-
 import styles from './Artifacts.module.css'
-import outputJSON from '../../output/output.json'
+import { OutputJSONType } from '../../consts/types'
 
 type Props = {
-  output: typeof outputJSON
+  output: OutputJSONType
   logs: string
 }
 
@@ -57,7 +56,8 @@ const Artifacts = (props: Props) => {
         </thead>
         <tbody>
           {items.map((item, idx) => (
-            <tr id={idx.toString()}>
+            // bleh
+            <tr key={idx.toString()} id={idx.toString()}>
               <td>
                 <span className={styles.code}>{item.fileName}</span>
               </td>

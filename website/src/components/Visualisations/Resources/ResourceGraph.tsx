@@ -16,60 +16,71 @@ import {
   Surface,
   Symbols,
   ReferenceLine,
+  ReferenceArea,
+  TooltipProps,
 } from 'recharts'
-import _ from 'lodash'
 import { OutputJSONType } from '../../../consts/types'
+import styles from './Resources.module.css'
+import { getSeasonEnds, outputToResourceLevels, ResourceLevel } from './utils'
+
+const CustomTooltip = ({ active, label, payload }: TooltipProps) => {
+  return (
+    active &&
+    label &&
+    payload && (
+      <div className={styles.customTooltip}>
+        <p className={styles.label}>{label}</p>
+        {payload.map((pl) => (
+          <p
+            style={{ color: pl.color }}
+            className={styles.content}
+            key={`${pl.name}${pl.value}`}
+          >
+            {pl.name}: {(pl.value as number).toFixed(1)}
+          </p>
+        ))}
+      </div>
+    )
+  )
+}
 
 interface IProps {
   output: OutputJSONType
 }
 
-class LineRechartComponent extends React.Component<IProps, any> {
+interface IState {
+  disabled: string[]
+}
+
+const legendColours = {
+  team1: '#0095FF',
+  team2: '#FF0000',
+  team3: '#802FF0',
+  team4: '#00C49F',
+  team5: '#FFBB28',
+  team6: '#FF8042',
+  CommonPool: '#ACE600',
+  TotalResources: '	#FF69B4',
+  CriticalThreshold: '#B7B4B0',
+}
+class ResourceGraph extends React.Component<IProps, IState> {
+  private chartData: ResourceLevel[]
+
   constructor(props) {
     super(props)
+    const { output } = this.props
     this.state = {
       disabled: [],
-      lineColours: {
-        team1: '#0095FF',
-        team2: '#FF0000',
-        team3: '#802FF0',
-        team4: '#00C49F',
-        team5: '#FFBB28',
-        team6: '#FF8042',
-      },
-      datapaths: {
-        team1: 'ClientInfos.Team1.Resources',
-        team2: 'ClientInfos.Team2.Resources',
-        team3: 'ClientInfos.Team3.Resources',
-        team4: 'ClientInfos.Team4.Resources',
-        team5: 'ClientInfos.Team5.Resources',
-        team6: 'ClientInfos.Team6.Resources',
-      },
-      chartData: this.props.output,
     }
+    this.chartData = outputToResourceLevels(output)
   }
 
-  handleClick = (dataKey) => {
+  handleClick = (dataKey: string) => {
     this.setState({
       disabled: this.state.disabled.includes(dataKey)
-        ? this.state.disabled.filter((obj) => obj !== dataKey)
+        ? this.state.disabled.filter((obj: string) => obj !== dataKey)
         : this.state.disabled.concat(dataKey),
     })
-  }
-
-  getSeasonEnds() {
-    const seasonEnds: any[] = []
-    let i
-    // eslint-disable-next-line no-restricted-syntax
-    for (i in this.state.chartData.GameStates) {
-      if (
-        this.state.chartData.GameStates[i].Environment.LastDisasterReport
-          .Magnitude !== 0
-      ) {
-        seasonEnds.push(this.state.chartData.GameStates[i].Turn - 1)
-      }
-    }
-    return seasonEnds
   }
 
   renderCustomizedLegend = ({ payload }: LegendProps) => {
@@ -77,8 +88,7 @@ class LineRechartComponent extends React.Component<IProps, any> {
       <div className="customized-legend">
         {payload?.map((entry) => {
           const { value, color } = entry
-          const { disabled } = this.state
-          const active = disabled.includes(value)
+          const active = this.state.disabled.includes(value)
           const style = {
             marginRight: 10,
             colour: active ? '#AAA' : '#000',
@@ -109,21 +119,18 @@ class LineRechartComponent extends React.Component<IProps, any> {
   }
 
   render() {
+    const { disabled } = this.state
+    const { output } = this.props
     return (
       <ResponsiveContainer height={330} width="100%">
         <LineChart
-          data={this.state.chartData.GameStates}
+          data={this.chartData}
           margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
         >
-          {_.toPairs<string>(this.state.lineColours)
-            .filter((pair) => !_.includes(this.state.disabled, pair[0]))
-            .map((pair) => (
-              <Line
-                name={pair[0]}
-                type="monotone"
-                dataKey={this.state.datapaths[pair[0]]}
-                stroke={pair[1]}
-              />
+          {Object.entries(legendColours)
+            .filter(([id]) => !disabled.includes(id))
+            .map(([id, colour]) => (
+              <Line name={id} type="monotone" dataKey={id} stroke={colour} />
             ))}
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis
@@ -139,8 +146,8 @@ class LineRechartComponent extends React.Component<IProps, any> {
           <YAxis
             label={{ value: 'Resources', angle: -90, position: 'insideLeft' }}
           />
-          <Tooltip />
-          {this.getSeasonEnds().map((seasonEnd) => (
+          <Tooltip content={CustomTooltip} />
+          {getSeasonEnds(output).map((seasonEnd) => (
             <ReferenceLine
               x={seasonEnd}
               label="Season End"
@@ -148,16 +155,25 @@ class LineRechartComponent extends React.Component<IProps, any> {
               strokeDasharray="3 3"
             />
           ))}
+          {!disabled.includes('CriticalThreshold') && (
+            <ReferenceArea
+              y1={0}
+              y2={output.Config.MinimumResourceThreshold}
+              label="CriticalThreshold"
+              stroke="#e6eeff"
+              strokeOpacity={0.1}
+            />
+          )}
           <Legend
             verticalAlign="top"
             align="center"
             height={20}
             wrapperStyle={{ top: 0, left: 25, right: 0, width: 'auto' }}
-            payload={_.toPairs<string>(this.state.lineColours).map((pair) => ({
-              value: pair[0],
-              color: pair[1],
+            payload={Object.entries(legendColours).map(([id, colour]) => ({
+              value: id,
+              color: colour,
               type: 'circle',
-              id: `${pair[0]}${pair[1]}`,
+              id: `${id}${colour}`,
             }))}
             content={this.renderCustomizedLegend}
           />
@@ -168,4 +184,4 @@ class LineRechartComponent extends React.Component<IProps, any> {
   }
 }
 
-export default LineRechartComponent
+export default ResourceGraph

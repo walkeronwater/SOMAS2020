@@ -8,21 +8,22 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts'
+import { teamColors } from '../utils'
 import styles from './Roles.module.css'
 
 import { ProcessedRoleData, TeamAndTurns, RoleName } from './Util/RoleTypes'
 import { processRoleData } from './Util/ProcessedRoleData'
 import { OutputJSONType } from '../../../consts/types'
+import IIGOStatus from './IIGOStatus'
 
 type CustomTooltipProps = {
   active: boolean
   payload: [{ name: string; value: number; unit: string }]
   label: string
   data: ProcessedRoleData
-  colors: Map<string, string>
 }
 
-const CustomTooltip = ({ active, label, data, colors }: CustomTooltipProps) => {
+const CustomTooltip = ({ active, label, data }: CustomTooltipProps) => {
   const getTurnsAsTeams = (role: RoleName): TeamAndTurns =>
     data
       .find((elem) => elem.role === role)
@@ -45,10 +46,12 @@ const CustomTooltip = ({ active, label, data, colors }: CustomTooltipProps) => {
           <p
             className={styles.content}
             key={team}
-            style={{ color: colors.get(team) }}
+            style={{ color: teamColors.get(team) }}
           >
-            Turns as {team}: {turns} ({((turns * 100) / totalTurns).toFixed(1)}
-            %)
+            {`Turns as ${team}: ${turns} (${(
+              (turns * 100) /
+              totalTurns
+            ).toFixed(1)} %)`}
           </p>
         ))}
       </div>
@@ -65,15 +68,10 @@ const Roles = (props: { output: OutputJSONType }) => {
     setData(processRoleData(props.output))
   }, [props.output])
 
-  const teams = ['Team1', 'Team2', 'Team3', 'Team4', 'Team5', 'Team6']
-  const colors = new Map([
-    ['Team1', '#0095FF'],
-    ['Team2', '#FF0000'],
-    ['Team3', '#802FF0'],
-    ['Team4', '#00C49F'],
-    ['Team5', '#FFBB28'],
-    ['Team6', '#FF8042'],
-  ])
+  const teams = ['Team1', 'Team2', 'Team3', 'Team4', 'Team5', 'Team6', 'NotRun']
+
+  const localTeamColor: Map<string, string> = teamColors
+  localTeamColor.set('NotRun', '#787878')
 
   return (
     <div className={styles.root}>
@@ -88,9 +86,7 @@ const Roles = (props: { output: OutputJSONType }) => {
             allowDecimals={false}
           />
           <Tooltip
-            content={(p: CustomTooltipProps) =>
-              CustomTooltip({ ...p, data, colors })
-            }
+            content={(p: CustomTooltipProps) => CustomTooltip({ ...p, data })}
           />
           <Legend
             verticalAlign="top"
@@ -98,7 +94,7 @@ const Roles = (props: { output: OutputJSONType }) => {
               value: team,
               type: 'square',
               id: `${team}${i}`,
-              color: colors.get(team),
+              color: localTeamColor.get(team),
             }))}
           />
           {data[0].occupied.map((a, i) => [
@@ -106,7 +102,7 @@ const Roles = (props: { output: OutputJSONType }) => {
               <Bar
                 dataKey={`occupied[${i}].${team}`}
                 stackId="a"
-                fill={colors.get(team)}
+                fill={localTeamColor.get(team)}
                 key={`${i.toString()}${team}`}
               />
             )),
@@ -114,6 +110,7 @@ const Roles = (props: { output: OutputJSONType }) => {
         </BarChart>
       </ResponsiveContainer>
       <p className={styles.graphLabel}>Turns</p>
+      <IIGOStatus output={props.output} />
     </div>
   )
 }

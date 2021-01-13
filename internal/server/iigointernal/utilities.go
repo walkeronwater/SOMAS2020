@@ -9,20 +9,18 @@ import (
 	"github.com/SOMAS2020/SOMAS2020/internal/common/shared"
 )
 
-func broadcastToAllIslands(sender shared.ClientID, data map[shared.CommunicationFieldName]shared.CommunicationContent) {
-	islandsAlive := rules.VariableMap[rules.IslandsAlive]
+func broadcastToAllIslands(clients map[shared.ClientID]baseclient.Client, sender shared.ClientID, data map[shared.CommunicationFieldName]shared.CommunicationContent, gameState gamestate.GameState) {
+	islandsAlive := gameState.RulesInfo.VariableMap[rules.IslandsAlive]
 	for _, v := range islandsAlive.Values {
-		communicateWithIslands(shared.TeamIDs[int(v)], sender, data)
+		communicateWithIslands(clients, shared.TeamIDs[int(v)], sender, data)
 	}
 }
 
-func setIIGOClients(clientMap *map[shared.ClientID]baseclient.Client) {
-	iigoClients = *clientMap
-}
+// func setIIGOClients(clientMap *map[shared.ClientID]baseclient.Client) {
+// 	iigoClients = *clientMap
+// }
 
-func communicateWithIslands(recipientID shared.ClientID, senderID shared.ClientID, data map[shared.CommunicationFieldName]shared.CommunicationContent) {
-
-	clients := iigoClients
+func communicateWithIslands(clients map[shared.ClientID]baseclient.Client, recipientID shared.ClientID, senderID shared.ClientID, data map[shared.CommunicationFieldName]shared.CommunicationContent) {
 
 	if recipientClient, ok := clients[recipientID]; ok {
 		recipientClient.ReceiveCommunication(senderID, data)
@@ -67,6 +65,12 @@ func boolToFloat(input bool) float64 {
 		return 1
 	}
 	return 0
+}
+
+func copyClientList(in []shared.ClientID) []shared.ClientID {
+	ret := make([]shared.ClientID, len(in))
+	copy(ret, in)
+	return ret
 }
 
 // if an IIGO role is dead, it is replaced with a random living island

@@ -22,12 +22,12 @@ jobs:
     - name: Test
       run: go test ./...
     - name: Run
-      run: go run .
+      run: go run . 
     - name: Output output.json
       run: cat output/output.json
     - name: Install yarn 
       run: npm i -g yarn  
-    - name: Cache node_modules #speed things up significantly
+    - name: Cache node_modules # speed things up significantly
       id: cache-node-modules
       uses: actions/cache@v2
       with:
@@ -42,5 +42,7 @@ jobs:
     - name: Test build website
       run: | 
         cd website
+        yarn test
         yarn build
-        yarn lint         
+        yarn lint 
+        test -f build/index.html
